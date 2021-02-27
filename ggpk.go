@@ -1,16 +1,18 @@
 package ggpk
 
 import (
-	"bytes"
-	"encoding/binary"
+	"errors"
+	"fmt"
+	"log"
 	"os"
 )
 
 // GGPK is a bin-packed container for game data.
 type GGPK struct {
 	file       *os.File
-	numRecords int32
-	offsets    []int64
+	numRecords uint32
+	childCount uint32
+	offsets    []uint64
 }
 
 // NewGGPK loads and initializes a GGPK file.
@@ -21,59 +23,39 @@ func NewGGPK(filename string) (*GGPK, error) {
 	}
 	g := &GGPK{file: f}
 
-	if err = g.getNumRecords(); err != nil {
-		return nil, err
-	}
-
-	if err = g.getOffsets(); err != nil {
-		return nil, err
-	}
-
-	return g, nil
-}
-
-func (g *GGPK) getNumRecords() error {
-	v, err := readInt32(g.file)
+	numRecords, err := readUint32(f)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	g.numRecords = v
-	return nil
-}
+	g.numRecords = numRecords
+	log.Print("records:", g.numRecords) // debug
 
-func (g *GGPK) getOffsets() error {
-	offsets := make([]int64, 0)
-	for i := int32(0); i < g.numRecords; i++ {
-		v, err := readInt64(g.file)
+	tag, err := readTag(f)
+	if err != nil {
+		return nil, err
+	}
+	if tag != "GGPK" {
+		msg := fmt.Sprintf("expected GGPK tag, got %s", tag)
+		return nil, errors.New(msg)
+	}
+
+	childCount, err := readUint32(f)
+	if err != nil {
+		return nil, err
+	}
+	g.childCount = childCount
+	log.Print("child count:", childCount) // debug
+
+	offsets := make([]uint64, 0)
+	for i := uint32(0); i < g.numRecords; i++ {
+		offset, err := readUint64(f)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		offsets = append(offsets, v)
+		offsets = append(offsets, offset)
 	}
 	g.offsets = offsets
-	return nil
-}
+	log.Print("offsets:", offsets) // debug
 
-func readInt32(f *os.File) (int32, error) {
-	buf := make([]byte, 4)
-	if _, err := f.Read(buf); err != nil {
-		return 0, err
-	}
-	var val int32
-	if err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &val); err != nil {
-		return 0, err
-	}
-	return val, nil
-}
-
-func readInt64(f *os.File) (int64, error) {
-	buf := make([]byte, 8)
-	if _, err := f.Read(buf); err != nil {
-		return 0, err
-	}
-	var val int64
-	if err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &val); err != nil {
-		return 0, err
-	}
-	return val, nil
+	return g, nil
 }
